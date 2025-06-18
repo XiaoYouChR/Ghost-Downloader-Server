@@ -1,0 +1,12 @@
+[tool.poetry]
+name = "ghost-downloader-sdk"
+version = "0.1.0"
+description = "SDK for Ghost Downloader feature packs."
+authors = ["XiaoYouChR@outlook.com"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pydantic = "^2.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.0"
