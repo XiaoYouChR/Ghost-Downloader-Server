@@ -49,7 +49,8 @@ class CoreEngine:
         self._workerManager.setCallbacks(
             onProgress=self.onStageProgress,
             onCompletion=self.onStageCompletion,
-            onError=self.onStageError
+            onError=self.onStageError,
+            OnSaveResumeData = self.onStageSaveResumeData
         )
 
     # --- Event System ---
@@ -193,6 +194,11 @@ class CoreEngine:
             await self._db.updateTaskStatus(stage.taskId, OverallTaskStatus.FAILED)
             await self._emit("stageUpdated", stageId, stage.taskId)
             await self._emit("taskUpdated", stage.taskId)
+
+    async def onStageSaveResumeData(self, stageId: str, resumeData: Dict[str, Any]):
+        """Callback to persist a worker's resumable state."""
+        logger.debug(f"Saving resume data for stage '{stageId}'.")
+        await self._db.upsertMetadata(stageId, "worker:resume_data", resumeData)
 
     # --- Internal Helpers ---
     def _prepareConfigForWorker(self, task: Task, worker: IWorker) -> Dict[str, Any]:
