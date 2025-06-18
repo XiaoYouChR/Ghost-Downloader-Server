@@ -75,9 +75,34 @@ class ConfigService:
         self._globalSettings[key] = value
         await self._db.saveSetting(key, value)
 
+    async def setGlobalSettings(self, settings: Dict[str, Any]):
+        """
+        Atomically updates multiple global settings.
+        This is more efficient than calling setGlobalSetting in a loop.
+        """
+        # 1. 验证所有 key
+        for key in settings.keys():
+            if key not in self._schemaRegistry:
+                raise ValueError(f"Attempted to set an unknown configuration key: '{key}'")
+
+        logger.info(f"Updating {len(settings)} global setting(s).")
+
+        # 2. 在内存中更新缓存
+        self._globalSettings.update(settings)
+
+        # 3. 批量更新数据库
+        await self._db.saveSettings(settings)
+
     def getGlobalSetting(self, key: str) -> Any:
         """Gets a global setting, falling back to its default value."""
         return self._globalSettings.get(key, self._schemaRegistry.get(key, ConfigField(key="", label="", fieldType="string", defaultValue=None)).defaultValue)
+
+    def getGlobalSettings(self) -> Dict[str, Any]:
+        """
+        Public getter for the currently set global configurations.
+        Returns a copy to prevent external mutation.
+        """
+        return self._globalSettings.copy()
 
     # --- 单个任务配置的更新 ---
 
@@ -145,7 +170,7 @@ class ConfigService:
             registry[config_field.key] = config_field
 
         # 从所有插件加载配置
-        for pack in self._pluginService.feature_packs.values():
+        for pack in self._pluginService._featurePacks.values():
             for config_field in pack.getConfigSchema():
                 if config_field.key in registry:
                     logger.warning(f"Duplicate config key '{config_field.key}' detected. Overwriting.")

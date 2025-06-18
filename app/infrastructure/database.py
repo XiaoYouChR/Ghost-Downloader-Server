@@ -1,20 +1,22 @@
+import json
+
 import aiosqlite
 from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from sdk.ghost_downloader_sdk.models import Task, TaskStage, TaskStatus, OverallTaskStatus, DisplayIntent
-import msgspec
 
-jsonEncoder = msgspec.json.Encoder()
-jsonDecoder = msgspec.json.Decoder(Any)
 
-def encodeJson(data: Any) -> bytes:
-    """Encodes Python objects to a UTF-8 encoded JSON byte string using msgspec."""
-    return jsonEncoder.encode(data)
 
-def decodeJson(data: bytes) -> Any:
-    """Decodes a UTF-8 encoded JSON byte string to Python objects using msgspec."""
-    return jsonDecoder.decode(data)
+def encodeJson(data: Any) -> str:
+    """Encodes Python objects (including Pydantic models) to a JSON string."""
+    if hasattr(data, 'model_dump'):
+        return data.model_dump_json()
+    return json.dumps(data, ensure_ascii=False)
+
+def decodeJson(data: str) -> Any:
+    """Decodes a JSON string to Python objects."""
+    return json.loads(data)
 
 
 CREATE_TABLES_SQL = """
@@ -33,9 +35,9 @@ CREATE TABLE IF NOT EXISTS task_stages (
     stageId TEXT PRIMARY KEY,
     taskId TEXT NOT NULL,
     stageIndex INTEGER NOT NULL,
-    displayIntent BLOB NOT NULL,
+    displayIntent TEXT NOT NULL, -- 使用 TEXT 存储 JSON 字符串
     workerType TEXT NOT NULL,
-    instructionPayload BLOB NOT NULL,
+    instructionPayload TEXT NOT NULL, -- 使用 TEXT
     status TEXT NOT NULL,
     progress REAL NOT NULL,
     FOREIGN KEY (taskId) REFERENCES tasks (taskId) ON DELETE CASCADE
@@ -45,13 +47,13 @@ CREATE TABLE IF NOT EXISTS metadata (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ownerId TEXT NOT NULL,
     metaKey TEXT NOT NULL,
-    metaValue BLOB NOT NULL,
+    metaValue TEXT NOT NULL, -- 使用 TEXT
     UNIQUE (ownerId, metaKey)
 );
 
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
-    value BLOB NOT NULL
+    value TEXT NOT NULL -- 使用 TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_metadata_ownerId ON metadata (ownerId);
@@ -85,13 +87,16 @@ class Database:
         
     # --- 数据映射辅助方法 ---
     def _mapRowToTask(self, row: aiosqlite.Row) -> Task:
-        return msgspec.msgpack.decode(msgspec.msgpack.encode(dict(row)), type=Task)
+        """Maps a database row to a Pydantic Task model."""
+        return Task.model_validate(dict(row))
 
     def _mapRowToTaskStage(self, row: aiosqlite.Row) -> TaskStage:
+        """Maps a database row to a Pydantic TaskStage model."""
         data = dict(row)
-        data['displayIntent'] = msgspec.json.decode(data['displayIntent'], type=DisplayIntent)
+        # 手动将 JSON 字符串解码回 Pydantic 模型或字典
+        data['displayIntent'] = DisplayIntent.model_validate_json(data['displayIntent'])
         data['instructionPayload'] = decodeJson(data['instructionPayload'])
-        return msgspec.msgpack.decode(msgspec.msgpack.encode(data), type=TaskStage)
+        return TaskStage.model_validate(data)
 
     # --- Task & Stage CRUD ---
     async def createTask(self, task: Task) -> None:
@@ -105,6 +110,14 @@ class Database:
         async with self._conn.execute(sql, (taskId,)) as cursor:
             row = await cursor.fetchone()
             return self._mapRowToTask(row) if row else None
+
+    async def getAllTasks(self) -> List[Task]:
+        """Retrieves all parent tasks from the database."""
+        # 注意：这里只获取顶层的 Task，不包括它们的 stages 和 metadata
+        sql = "SELECT * FROM tasks ORDER BY createdAt DESC"
+        async with self._conn.execute(sql) as cursor:
+            rows = await cursor.fetchall()
+            return [self._mapRowToTask(row) for row in rows]
 
     async def getAllMetadata(self, ownerId: str) -> Dict[str, Any]:
         """Retrieves all metadata key-value pairs for a given owner ID."""
@@ -121,7 +134,7 @@ class Database:
 
     async def addStages(self, stages: List[TaskStage]) -> None:
         sql = "INSERT INTO task_stages (stageId, taskId, stageIndex, displayIntent, workerType, instructionPayload, status, progress) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-        stageTuples = [(s.stageId, s.taskId, s.stageIndex, encodeJson(s.displayIntent), s.workerType, 
+        stageTuples = [(s.stageId, s.taskId, s.stageIndex, encodeJson(s.displayIntent), s.workerType,
                         encodeJson(s.instructionPayload), s.status.value, s.progress) for s in stages]
         await self._conn.executemany(sql, stageTuples)
         await self._conn.commit()
@@ -156,23 +169,16 @@ class Database:
         Returns:
             A dictionary representing the task and its nested details, or None if not found.
         """
-        # 1. 获取主任务
         task = await self.getTask(taskId)
         if not task:
             return None
 
-        # 2. 将主任务转换为字典
-        # 使用 msgspec.to_builtins 来处理 msgspec.Struct
-        taskDict = msgspec.to_builtins(task)
+        taskDict = task.model_dump()
 
-        # 3. 获取并附加所有 stages
         stages = await self.getStagesForTask(taskId)
-        taskDict['stages'] = stages # stages 已经是 list of TaskStage structs
+        taskDict['stages'] = [s.model_dump() for s in stages]
 
-        # 4. 获取并附加所有父任务的元数据
-        metadata = await self.getAllMetadata(taskId)
-        taskDict['metadata'] = metadata # metadata 已经是 dict
-
+        taskDict['metadata'] = await self.getAllMetadata(taskId)
         return taskDict
 
     async def getStage(self, stageId: str) -> Optional[TaskStage]:
@@ -230,6 +236,18 @@ class Database:
         async with self._conn.execute(sql, (ownerId, key)) as cursor:
             row = await cursor.fetchone()
             return decodeJson(row['metaValue']) if row and row['metaValue'] else None
+
+    async def saveSettings(self, settings: Dict[str, Any]):
+        """Saves or updates multiple settings in a single transaction."""
+        sql = """
+        INSERT INTO settings (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """
+        params = [(key, encodeJson(value)) for key, value in settings.items()]
+        async with self._conn.cursor() as cursor:
+             await cursor.executemany(sql, params)
+        await self._conn.commit()
+        logger.info(f"Bulk saved {len(settings)} settings to database.")
 
     async def saveSetting(self, key: str, value: Any):
         sql = "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"

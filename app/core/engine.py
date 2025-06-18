@@ -1,14 +1,10 @@
-# app/core/engine.py
-
 import asyncio
 from typing import Dict, Any, List, Optional, Callable
 from loguru import logger
-import msgspec
 
-# 从 SDK 导入所有需要的 msgspec 模型和接口
 from sdk.ghost_downloader_sdk.models import (
     Task, TaskStage, StageDefinition, CompletedTaskContext,
-    TaskStatus, OverallTaskStatus, WorkerCapabilities
+    TaskStatus, OverallTaskStatus
 )
 from sdk.ghost_downloader_sdk.interfaces import IWorker
 
@@ -73,6 +69,38 @@ class CoreEngine:
         return self._taskLocks[taskId]
 
     # --- Public Control API (called by Middleware) ---
+    async def getAllTasks(self) -> List[Task]:
+        """
+        Retrieves a list of all parent tasks.
+        This method is designed for a high-level overview, so it does not
+        include detailed stages or metadata.
+        """
+        logger.debug("Fetching all tasks for API request.")
+        tasksFromDb = await self._db.getAllTasks()
+        return tasksFromDb
+
+    async def getTask(self, taskId: str) -> Optional[Task]:
+        """
+        Retrieves a single parent task object by its ID, without its details.
+        """
+        logger.debug(f"Fetching task '{taskId}' for API request.")
+        task = await self._db.getTask(taskId)
+        return task
+
+    async def getTaskWithDetails(self, taskId: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a single task with all its associated stages and metadata.
+        Returns a dictionary defectos suitable for direct JSON serialization.
+        """
+        logger.debug(f"Fetching full details for task '{taskId}'.")
+
+        # 我们的 database.getTaskWithDetails 已经返回了我们需要的字典结构
+        taskDetailsDict = await self._db.getTaskWithDetails(taskId)
+
+        if not taskDetailsDict:
+            return None
+
+        return taskDetailsDict
 
     async def createTask(self, title: str, metadata: Dict[str, Any] = {}) -> Task:
         """Creates a new parent Task and persists it."""

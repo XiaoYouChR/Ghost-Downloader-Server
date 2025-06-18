@@ -1,5 +1,10 @@
+import shutil
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from weakref import ref, WeakKeyDictionary
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, IO
+from zipfile import ZipFile
+
 from loguru import logger
 
 
@@ -24,7 +29,8 @@ class UnifiedPluginService:
     Reloading is triggered manually to ensure stability.
     """
     def __init__(self, featureDir: str):
-        self.featureDir = featureDir
+        self.featureDir = Path(featureDir).resolve()
+        self.featureDir.mkdir(parents=True, exist_ok=True)
 
         # 能力注册表 (Ability Registries)
         self._parsers: List[RegisteredAbility] = []
@@ -32,7 +38,7 @@ class UnifiedPluginService:
         self._workers: Dict[str, List[RegisteredAbility]] = {} # Key: workerType
         self._featurePacks: Dict[str, IFeaturePack] = {} # Key: packId
 
-        # 一个用于反向查找的弱引用映射
+        # 用于反向查找的弱引用映射
         self._abilityToPackIdMap = WeakKeyDictionary()
 
     # --- 生命周期与重载控制 ---
@@ -44,7 +50,7 @@ class UnifiedPluginService:
         logger.info("Loading feature packs...")
         self._clearRegistries()
 
-        loadedPackClasses = loadFeaturePackClassesFromDirectory(self.featureDir)
+        loadedPackClasses = loadFeaturePackClassesFromDirectory(str(self.featureDir))
 
         for moduleName, packClass in loadedPackClasses:
             try:
@@ -66,14 +72,116 @@ class UnifiedPluginService:
 
         self._logRegistryState()
 
-    def triggerReload(self):
+    def triggerReload(self) -> Dict[str, Any]:
         """
         Manually triggers a full reload of all plugins.
         This is the sole entry point for updating plugins during runtime.
         """
         logger.info("Manual plugin reload triggered.")
         self.loadPlugins()
-        return {"status": "success", "loaded_packs": len(self._featurePacks)}
+        return {
+            "status": "success",
+            "loadedPacks": len(self._featurePacks),
+            "packIds": list(self._featurePacks.keys())
+        }
+
+    # --- 安装与卸载 ---
+    async def installPluginFromFile(self, filename: str, fileStream: IO[bytes]) -> Dict[str, Any]:
+        """
+        Installs a plugin from a file stream (e.g., an upload).
+        It extracts the zip to a temp location, validates it, moves it, and reloads.
+        """
+        logger.info(f"Starting installation of plugin from file: '{filename}'")
+
+        with TemporaryDirectory() as tempDirStr:
+            tempDir = Path(tempDirStr)
+            tempZipPath = tempDir / filename
+
+            with open(tempZipPath, 'wb') as f:
+                shutil.copyfileobj(fileStream, f)
+
+            # 解压并验证包结构
+            extractedDir = tempDir / "extracted"
+            with ZipFile(tempZipPath, 'r') as zipRef:
+                zipRef.extractall(extractedDir)
+
+            # 找到并验证插件的根目录
+            # 我们期望 zip 包内只有一个根目录，这个目录就是插件本身
+            extractedItems = list(extractedDir.iterdir())
+            if len(extractedItems) != 1 or not extractedItems[0].is_dir():
+                raise ValueError("ZIP archive must contain a single root directory for the plugin.")
+
+            pluginSourceDir = extractedItems[0]
+
+            # 验证 __init__.py 的存在
+            if not (pluginSourceDir / '__init__.py').is_file():
+                raise ValueError("Plugin directory must contain an '__init__.py' file.")
+
+            # 插件的 ID 就是其根目录的名称
+            pluginId = pluginSourceDir.name
+
+            # 移动到最终的 features 目录
+            targetDir = self.featureDir / pluginId
+            if targetDir.exists():
+                raise ValueError(f"Conflict: A plugin with ID '{pluginId}' already exists.")
+
+            shutil.move(str(pluginSourceDir), str(targetDir))
+            logger.info(f"Plugin '{pluginId}' successfully moved to '{targetDir}'.")
+
+        # 触发重载以激活新插件
+        self.triggerReload()
+
+        # 确认插件已加载并返回其元数据
+        newlyLoadedPack = self._featurePacks.get(pluginId)
+        if not newlyLoadedPack:
+            # 如果重载后没找到，说明插件本身可能有问题
+            raise RuntimeError(f"Plugin '{pluginId}' was installed but failed to load. Please check server logs.")
+
+        logger.success(f"Plugin '{pluginId}' installed and activated.")
+        return newlyLoadedPack.metadata
+
+    async def installPluginFromUrl(self, url: str):
+        """
+        (Placeholder) Initiates the installation of a new plugin from a URL.
+        """
+        logger.info(f"Plugin installation from URL requested: {url}. This feature is not yet implemented.")
+        # TODO:
+        # 1. Implement a basic, secure HTTP downloader here.
+        # 2. Download the zip file to a temporary location.
+        # 3. Call `installPluginFromFile` with the downloaded file stream.
+        raise NotImplementedError("Plugin installation from URL is not yet implemented.")
+
+    async def uninstallPlugin(self, pluginId: str):
+        """Finds a plugin by its ID, removes its directory, and triggers a reload."""
+        logger.info(f"Requesting to uninstall plugin with ID: '{pluginId}'")
+
+        # 验证插件当前是否已加载
+        if pluginId not in self._featurePacks:
+            raise FileNotFoundError(f"Plugin with ID '{pluginId}' is not currently loaded or does not exist.")
+
+        # 插件目录名约定与插件 ID 一致
+        pluginDir = self.featureDir / pluginId
+
+        if not pluginDir.is_dir():
+             raise FileNotFoundError(f"Plugin directory for ID '{pluginId}' not found at expected location: '{pluginDir}'.")
+
+        # 使用 shutil.rmtree 来递归删除目录，需要小心处理错误
+        try:
+            shutil.rmtree(pluginDir)
+            logger.info(f"Removed plugin directory: '{pluginDir}'")
+        except OSError as e:
+            logger.error(f"Failed to remove plugin directory '{pluginDir}': {e}")
+            raise IOError(f"Could not delete plugin files. Please check file permissions.")
+
+        # 触发重载以移除已卸载的插件
+        self.triggerReload()
+
+        # 确认插件已被移除
+        if pluginId in self._featurePacks:
+            logger.error(f"Plugin '{pluginId}' was deleted but still loaded after reload. Check for caching or loading issues.")
+            raise RuntimeError(f"Failed to fully unload plugin '{pluginId}'.")
+
+        logger.success(f"Plugin '{pluginId}' uninstalled and unloaded successfully.")
 
     # --- 内部注册逻辑 ---
 
@@ -142,14 +250,14 @@ class UnifiedPluginService:
             logger.warning(f"No workers found for type '{workerType}'.")
             return None
 
-        # 1. 处理 preferredPackId 的情况 (通常用于内部或特定流程)
+        # 1. 处理 preferredPackId 的情况
         if preferredPackId:
             for workerAbility in registeredWorkers:
                 if workerAbility.packId == preferredPackId:
                     logger.debug(f"Found preferred worker for type '{workerType}' from pack '{preferredPackId}'.")
                     return workerAbility.implementation
 
-        # 2 & 3. 基于优先级的选择
+        # 基于优先级的选择
         bestWorker: Optional[IWorker] = None
         highestPriority = -1
 
