@@ -103,7 +103,7 @@ class CoreEngine:
 
     async def createTask(self, title: str, metadata: Dict[str, Any] = {}) -> Task:
         """Creates a new parent Task and persists it."""
-        taskModel = Task(title=title)
+        taskModel = Task(title=title, metadata=metadata)
         await self._db.createTask(taskModel)
         if metadata:
             await self._db.upsertMetadata(taskModel.taskId, "task:initial_metadata", metadata)
