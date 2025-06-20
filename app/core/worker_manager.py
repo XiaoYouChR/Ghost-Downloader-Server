@@ -1,13 +1,14 @@
 import asyncio
-from typing import Dict, Any, List, Optional, Callable, Awaitable
+from typing import Dict, Any, Optional, Callable, Awaitable
+
 from loguru import logger
 
-from sdk.ghost_downloader_sdk.models import TaskStage, TaskStatus
 from sdk.ghost_downloader_sdk.interfaces import IWorker, IWorkerContext
+from sdk.ghost_downloader_sdk.models import TaskStage
 
 ProgressCallback = Callable[[str, float], Awaitable[None]]
 CompletionCallback = Callable[[str, Dict[str, Any]], Awaitable[None]]
-ErrorCallback = Callable[[str, Exception], Awaitable[None]]
+ErrorCallback = Callable[[str, BaseException], Awaitable[None]]
 SaveResumeDataCallback = Callable[[str, Dict[str, Any]], Awaitable[None]]
 
 class _WorkerContext(IWorkerContext):
@@ -131,24 +132,23 @@ class WorkerManager:
         else:
             logger.warning(f"Attempted to cancel stage '{stageId}', but it was not found in the running tasks.")
 
-    async def _executeWrapper(self, stage: TaskStage, worker: IWorker, config: Dict[str, Any]):
+    async def _executeWrapper(
+        self, stage: TaskStage, worker: IWorker, context: _WorkerContext
+    ):
         """
         A private wrapper that runs the worker's execute method, handles
         completion/errors, and releases the semaphore.
         """
         stageId = stage.stageId
         try:
-            context = _WorkerContext(
-                stageId,
-                config,
-                onProgress=self._onProgress,
-                onCompletion=self._onCompletion,
-                onError=self._onError,
-                onSaveResumeData=self._onSaveResumeData
-            )
-
-            # 核心执行步骤
             await worker.execute(stage.instructionPayload, context)
+
+            # 检查任务是否在执行过程中已经被取消，如果是，则不报告完成
+            if context.shouldCleanupOnCancel() or (
+                stageId in self._runningTasks
+                and self._runningTasks[stageId][0].cancelled()
+            ):
+                return
 
             # 如果 worker 的 execute 方法正常返回而没有调用 onCompletion，我们在这里补上
             # await self._onCompletion(stageId, {})

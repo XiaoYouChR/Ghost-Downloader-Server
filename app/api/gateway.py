@@ -1,20 +1,16 @@
-# app/api/gateway.py
-
 import time
+
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from loguru import logger
 
 from app.api.routers import task_router, plugin_router, config_router
-# 导入我们的核心服务类型，用于类型注解和状态存储
-from app.core.middleware import Middleware
 from app.core.engine import CoreEngine
-from app.infrastructure.plugin.plugin_service import UnifiedPluginService
-from app.infrastructure.config_service import ConfigService
 
-# 导入我们即将创建的路由模块
-# from .routers import task_router, plugin_router, config_router
+from app.core.middleware import Middleware
+from app.infrastructure.config_service import ConfigService
+from app.infrastructure.plugin.plugin_service import UnifiedPluginService
 
 def create_app(
     middleware: Middleware,
@@ -35,7 +31,6 @@ def create_app(
         redoc_url="/redoc",
     )
 
-    # --- 将核心服务实例存储在 app.state 中 ---
     app.state.middleware = middleware
     app.state.coreEngine = coreEngine
     app.state.pluginService = pluginService

@@ -1,18 +1,19 @@
 import asyncio
 from typing import Dict, Any, List, Optional, Callable
+
 from loguru import logger
 
+from sdk.ghost_downloader_sdk.interfaces import IWorker
 from sdk.ghost_downloader_sdk.models import (
     Task, TaskStage, StageDefinition, CompletedTaskContext,
     TaskStatus, OverallTaskStatus
 )
-from sdk.ghost_downloader_sdk.interfaces import IWorker
-
+from .worker_manager import WorkerManager
+from ..infrastructure.config_service import ConfigService
 # 导入依赖的基础设施服务
 from ..infrastructure.database import Database
 from ..infrastructure.plugin.plugin_service import UnifiedPluginService
-from ..infrastructure.config_service import ConfigService
-from .worker_manager import WorkerManager
+
 
 class CoreEngine:
     """
@@ -212,7 +213,7 @@ class CoreEngine:
             await self._emit("stageUpdated", stageId, stage.taskId)
             asyncio.create_task(self.scheduleTask(stage.taskId))
 
-    async def onStageError(self, stageId: str, error: Exception):
+    async def onStageError(self, stageId: str, error: BaseException):
         logger.error(f"Stage '{stageId}' failed: {error}")
         stage = await self._db.getStage(stageId)
         if stage:

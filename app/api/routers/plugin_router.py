@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from typing import List, Dict, Any
+
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from loguru import logger
 from pydantic import BaseModel
 
-from app.infrastructure.plugin.plugin_service import UnifiedPluginService
 from app.api.deps import get_plugin_service
+from app.infrastructure.plugin.plugin_service import UnifiedPluginService
+
 
 # --- 请求体模型  ---
 class InstallPluginRequest(BaseModel):

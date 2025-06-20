@@ -1,11 +1,10 @@
 import json
+from typing import Any, Dict, List, Optional
 
 import aiosqlite
-from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from sdk.ghost_downloader_sdk.models import Task, TaskStage, TaskStatus, OverallTaskStatus, DisplayIntent
-
 
 
 def encodeJson(data: Any) -> str:
@@ -86,11 +85,13 @@ class Database:
         logger.info("Database connection closed.")
         
     # --- 数据映射辅助方法 ---
-    def _mapRowToTask(self, row: aiosqlite.Row) -> Task:
+    @staticmethod
+    def _mapRowToTask(row: aiosqlite.Row) -> Task:
         """Maps a database row to a Pydantic Task model."""
         return Task.model_validate(dict(row))
 
-    def _mapRowToTaskStage(self, row: aiosqlite.Row) -> TaskStage:
+    @staticmethod
+    def _mapRowToTaskStage(row: aiosqlite.Row) -> TaskStage:
         """Maps a database row to a Pydantic TaskStage model."""
         data = dict(row)
         # 手动将 JSON 字符串解码回 Pydantic 模型或字典

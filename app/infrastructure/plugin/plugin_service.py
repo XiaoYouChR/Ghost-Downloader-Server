@@ -1,15 +1,15 @@
 import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from weakref import ref, WeakKeyDictionary
 from typing import List, Dict, Optional, Any, IO
+from weakref import ref, WeakKeyDictionary
 from zipfile import ZipFile
 
 from loguru import logger
 
-
 from sdk.ghost_downloader_sdk.interfaces import IFeaturePack, IParser, IWorkflow, IWorker
 from .loader import loadFeaturePackClassesFromDirectory
+
 
 class RegisteredAbility:
     """A wrapper that stores an ability and a reference to its parent pack."""
@@ -196,12 +196,16 @@ class UnifiedPluginService:
         packId = pack.metadata['id']
 
         # 注册并建立反向映射
-        for parser in pack.getParsers():
+        _ = pack.getParsers()
+        assert _ is not None
+        for parser in _:
             registeredAbility = RegisteredAbility(pack, parser)
             self._parsers.append(registeredAbility)
             self._abilityToPackIdMap[parser] = packId
 
-        for workflow in pack.getWorkflows():
+        _ = pack.getWorkflows()
+        assert _ is not None
+        for workflow in _:
             registeredAbility = RegisteredAbility(pack, workflow)
             self._workflows.append(registeredAbility)
             self._abilityToPackIdMap[workflow] = packId
@@ -223,6 +227,7 @@ class UnifiedPluginService:
     def findParserForUrl(self, url: str) -> Optional[IParser]:
         """Finds the first parser that can handle the given URL."""
         for registeredParser in self._parsers:
+            assert isinstance(registeredParser.implementation, IParser)
             if registeredParser.implementation.canHandle(url):
                 return registeredParser.implementation
         return None
@@ -231,7 +236,7 @@ class UnifiedPluginService:
         """Finds all workflows that can handle the completed task context."""
         return [
             rw.implementation for rw in self._workflows
-            if rw.implementation.canHandle(context)
+            if isinstance(rw.implementation, IWorkflow) and rw.implementation.canHandle(context)
         ]
 
     def findBestWorker(self, workerType: str, taskPayload: Dict[str, Any], preferredPackId: Optional[str] = None) -> Optional[IWorker]:
@@ -254,6 +259,7 @@ class UnifiedPluginService:
             for workerAbility in registeredWorkers:
                 if workerAbility.packId == preferredPackId:
                     logger.debug(f"Found preferred worker for type '{workerType}' from pack '{preferredPackId}'.")
+                    assert isinstance(workerAbility.implementation, IWorker)
                     return workerAbility.implementation
 
         # 基于优先级的选择
@@ -263,6 +269,7 @@ class UnifiedPluginService:
         for workerAbility in registeredWorkers:
             try:
                 # 获取 Worker 类的静态方法 getPriority
+                assert isinstance(workerAbility.implementation, IWorker)
                 workerClass = type(workerAbility.implementation)
                 priority = workerClass.getPriority(taskPayload)
 

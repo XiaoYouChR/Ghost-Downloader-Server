@@ -1,12 +1,11 @@
-# app/core/middleware.py
+from typing import Dict, Any, List
 
-from typing import Dict, Any, List, Optional
 from loguru import logger
 
 from sdk.ghost_downloader_sdk.models import Task, StageDefinition, CompletedTaskContext
-
-from ..infrastructure.plugin.plugin_service import UnifiedPluginService
 from .engine import CoreEngine
+from ..infrastructure.plugin.plugin_service import UnifiedPluginService
+
 
 class Middleware:
     def __init__(self, pluginService: UnifiedPluginService, coreEngine: CoreEngine):

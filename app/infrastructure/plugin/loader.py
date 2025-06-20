@@ -1,9 +1,11 @@
-import os
 import importlib.util
+import os
 from typing import List, Tuple, Type
+
 from loguru import logger
 
 from sdk.ghost_downloader_sdk.interfaces import IFeaturePack
+
 
 def loadFeaturePackClassesFromDirectory(directory: str) -> List[Tuple[str, Type[IFeaturePack]]]:
     """

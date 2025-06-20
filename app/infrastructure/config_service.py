@@ -1,10 +1,11 @@
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Awaitable
+
 from loguru import logger
 
+from sdk.ghost_downloader_sdk.models import ConfigField, Task
 from .database import Database
 from .plugin.plugin_service import UnifiedPluginService
-from sdk.ghost_downloader_sdk.models import ConfigField, Task
 
 
 class ConfigService:

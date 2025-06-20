@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Dict, Any
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel
 
-from app.infrastructure.config_service import ConfigService
 from app.api.deps import get_config_service
-
+from app.infrastructure.config_service import ConfigService
 from sdk.ghost_downloader_sdk.models import ConfigField
+
 
 # --- 请求体模型 ---
 class UpdateGlobalConfigRequest(BaseModel):
