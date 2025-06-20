@@ -30,6 +30,14 @@ class IWorkerContext(ABC):
         """Provides access to the effective configuration for this worker execution."""
         pass
 
+    @abstractmethod
+    def setCleanupFlag(self, cleanup: bool):
+        self._cleanupOnCancel = cleanup
+
+    @abstractmethod
+    def shouldCleanupOnCancel(self) -> bool:
+        return self._cleanupOnCancel
+
 class IParser(ABC):
     @abstractmethod
     def canHandle(self, url: str) -> bool:

@@ -32,7 +32,6 @@ class UnifiedPluginService:
         self.featureDir = Path(featureDir).resolve()
         self.featureDir.mkdir(parents=True, exist_ok=True)
 
-        # 能力注册表 (Ability Registries)
         self._parsers: List[RegisteredAbility] = []
         self._workflows: List[RegisteredAbility] = []
         self._workers: Dict[str, List[RegisteredAbility]] = {} # Key: workerType
@@ -171,7 +170,7 @@ class UnifiedPluginService:
             logger.info(f"Removed plugin directory: '{pluginDir}'")
         except OSError as e:
             logger.error(f"Failed to remove plugin directory '{pluginDir}': {e}")
-            raise IOError(f"Could not delete plugin files. Please check file permissions.")
+            raise IOError("Could not delete plugin files. Please check file permissions.")
 
         # 触发重载以移除已卸载的插件
         self.triggerReload()
@@ -250,7 +249,7 @@ class UnifiedPluginService:
             logger.warning(f"No workers found for type '{workerType}'.")
             return None
 
-        # 1. 处理 preferredPackId 的情况
+        # 处理 preferredPackId 的情况
         if preferredPackId:
             for workerAbility in registeredWorkers:
                 if workerAbility.packId == preferredPackId:

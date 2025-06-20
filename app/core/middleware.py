@@ -26,26 +26,25 @@ class Middleware:
         """
         logger.info(f"Attempting to create task from URL: {url}")
 
-        # 1. 查找 Parser
+        # 查找 Parser
         parser = self._pluginService.findParserForUrl(url)
         if not parser:
             # 明确地处理无法解析的情况
             logger.error(f"No suitable parser found for URL: {url}")
-            raise ValueError(f"Unsupported URL type. No active plugin can handle this link.")
+            raise ValueError("Unsupported URL type. No active plugin can handle this link.")
 
         logger.debug(f"Using parser '{type(parser).__name__}' for URL.")
 
-        # 2. 从 Parser 获取初始阶段
-        # 增加错误处理，因为插件的实现可能是不可靠的
+        # 从 Parser 获取初始阶段
         try:
             initialStageDefs: List[StageDefinition] = await parser.getInitialStages(url)
             if not initialStageDefs:
                 raise ValueError("Parser returned an empty list of initial stages.")
         except Exception as e:
             logger.error(f"Parser '{type(parser).__name__}' failed to get initial stages for '{url}': {e}", exc_info=True)
-            raise IOError(f"Failed to parse URL due to a plugin error.")
+            raise IOError("Failed to parse URL due to a plugin error.")
 
-        # 3. 准备父任务的元数据
+        # 准备父任务的元数据
         parserPackId = self._pluginService.findPackIdForAbility(parser)
         taskMetadata = {
             'sourceUrl': url,
@@ -56,14 +55,13 @@ class Middleware:
         # 从第一个阶段的描述意图中获取一个合适的标题
         taskTitle = initialStageDefs[0].displayIntent.context.get('title', url)
 
-        # 4. 创建任务和阶段
+        # 创建任务和阶段
         parentTask = await self._coreEngine.createTask(title=taskTitle, metadata=taskMetadata)
         await self._coreEngine.addStagesToTask(parentTask.taskId, initialStageDefs)
 
         logger.success(f"Successfully created task '{parentTask.taskId}' ('{taskTitle}') with {len(initialStageDefs)} initial stage(s).")
 
-        # 5. 返回完整的父任务对象
-        return await self._coreEngine.getTaskWithDetails(parentTask.taskId)
+        return parentTask
 
     # --- Event Handler Methods ---
 
@@ -75,7 +73,7 @@ class Middleware:
         taskId = context.parentTask.taskId
         logger.info(f"Handling completion for task '{taskId}'. Searching for applicable workflows.")
 
-        # 1. 查找匹配的工作流
+        # 查找匹配的工作流
         matchedWorkflows = self._pluginService.findWorkflowsForTask(context)
         if not matchedWorkflows:
             logger.info(f"No workflows found for completed task '{taskId}'. Process ends.")

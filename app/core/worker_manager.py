@@ -17,6 +17,7 @@ class _WorkerContext(IWorkerContext):
     """
     _config: Dict[str, Any]
     _stageId: str
+    _cleanupOnCancel: bool = False
 
     _onProgress: ProgressCallback
     _onCompletion: CompletionCallback
@@ -48,6 +49,12 @@ class _WorkerContext(IWorkerContext):
     async def saveResumeData(self, resumeData: Dict[str, Any]):
         await self._onSaveResumeData(self._stageId, resumeData)
 
+    def setCleanupFlag(self, cleanup: bool):
+        self._cleanupOnCancel = cleanup
+
+    def shouldCleanupOnCancel(self) -> bool:
+        return self._cleanupOnCancel
+
 
 class WorkerManager:
     """
@@ -57,8 +64,7 @@ class WorkerManager:
     _maxConcurrentWorkers: int
     _semaphore: asyncio.Semaphore
 
-    # 映射：stageId -> asyncio.Task
-    _runningTasks: Dict[str, asyncio.Task]
+    _runningTasks: Dict[str, tuple[asyncio.Task, _WorkerContext]]
 
     # CoreEngine 提供的回调函数
     _onProgress: ProgressCallback
@@ -72,7 +78,8 @@ class WorkerManager:
 
         self._maxConcurrentWorkers = maxConcurrentWorkers
         self._semaphore = asyncio.Semaphore(self._maxConcurrentWorkers)
-        self._runningTasks = {}
+        _runningTasks: Dict[str, tuple[asyncio.Task, _WorkerContext]] = {}
+
         logger.info(f"WorkerManager initialized with a concurrency limit of {self._maxConcurrentWorkers}.")
 
     def setCallbacks(self, **callbacks):
@@ -83,41 +90,41 @@ class WorkerManager:
         self._onSaveResumeData = callbacks.get('onSaveResumeData')
 
     async def submitTask(self, stage: TaskStage, workerImplementation: IWorker, config: Dict[str, Any]):
-        """
-        Submits a stage for execution. It acquires a concurrency slot and
-        starts the worker in a new asyncio Task.
-        """
-        logger.info(f"Submitting stage '{stage.stageId}' of type '{stage.workerType}' to the execution queue.")
-
-        # 使用信号量来等待一个可用的“执行槽”
+        logger.info(f"Submitting stage '{stage.stageId}' of type '{stage.workerType}'.")
         await self._semaphore.acquire()
+        logger.debug(f"Concurrency slot acquired for stage '{stage.stageId}'.")
 
-        logger.debug(f"Concurrency slot acquired for stage '{stage.stageId}'. Starting worker.")
-
-        # 运行一个包裹了 worker 执行逻辑的协程任务
-        task = asyncio.create_task(
-            self._executeWrapper(stage, workerImplementation, config)
+        context = _WorkerContext(
+            stage.stageId, config,
+            onProgress=self._onProgress,
+            onCompletion=self._onCompletion,
+            onError=self._onError,
+            onSaveResumeData=self._onSaveResumeData
         )
 
-        # 记录这个正在运行的任务，以便取消
-        self._runningTasks[stage.stageId] = task
+        task = asyncio.create_task(
+            self._executeWrapper(stage, workerImplementation, context)
+        )
+
+        self._runningTasks[stage.stageId] = (task, context)
 
     async def cancelTask(self, stageId: str, cleanup: bool = False):
         """
         Cancels a running task associated with a stageId.
         """
         if stageId in self._runningTasks:
-            task = self._runningTasks[stageId]
+            task, context = self._runningTasks[stageId]
 
             if not task.done():
                 logger.info(f"Cancelling execution for stage '{stageId}'...")
-                task.cancel() # 发送取消请求
+
+                context.setCleanupFlag(cleanup)
+                task.cancel()
 
                 try:
-                    await task # 等待任务响应取消
+                    await task
                 except asyncio.CancelledError:
                     logger.success(f"Execution for stage '{stageId}' was successfully cancelled.")
-                # 注意：Worker 内部需要捕获 CancelledError 来执行清理逻辑
 
             # 从映射中移除
             del self._runningTasks[stageId]
@@ -131,7 +138,6 @@ class WorkerManager:
         """
         stageId = stage.stageId
         try:
-            # 创建上下文对象，并注入回调
             context = _WorkerContext(
                 stageId,
                 config,
@@ -145,14 +151,12 @@ class WorkerManager:
             await worker.execute(stage.instructionPayload, context)
 
             # 如果 worker 的 execute 方法正常返回而没有调用 onCompletion，我们在这里补上
-            # (这是一个健壮性措施)
             # await self._onCompletion(stageId, {})
+            # worker 需要处理 context.shouldCleanupOnCancel 后重新 raise CancelledError
 
         except asyncio.CancelledError:
             logger.info(f"Worker for stage '{stageId}' was cancelled.")
-            # 当被取消时，我们将其标记为 PAUSED，以便可以恢复
-            await self._db.updateStage(stageId, {'status': TaskStatus.PAUSED.value})
-            await self._onProgress(stageId, 0.0) # Reset progress for UI if needed
+            await self._onError(stageId, asyncio.CancelledError(f"Stage was cancelled by user. Cleanup: {context.shouldCleanupOnCancel()}"))
 
         except Exception as e:
             # 捕获 worker 执行过程中的所有其他异常

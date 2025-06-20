@@ -94,7 +94,6 @@ class CoreEngine:
         """
         logger.debug(f"Fetching full details for task '{taskId}'.")
 
-        # 我们的 database.getTaskWithDetails 已经返回了我们需要的字典结构
         taskDetailsDict = await self._db.getTaskWithDetails(taskId)
 
         if not taskDetailsDict:
@@ -217,9 +216,14 @@ class CoreEngine:
         logger.error(f"Stage '{stageId}' failed: {error}")
         stage = await self._db.getStage(stageId)
         if stage:
-            await self._db.updateStage(stageId, {'status': TaskStatus.FAILED.value})
-            await self._db.upsertMetadata(stageId, "worker:last_error", {"error": str(error)})
-            await self._db.updateTaskStatus(stage.taskId, OverallTaskStatus.FAILED)
+            if isinstance(error, asyncio.CancelledError):
+                await self._db.updateStage(stageId, {'status': TaskStatus.PAUSED.value})
+                await self._db.updateTaskStatus(stage.taskId, OverallTaskStatus.PAUSED)
+            else:
+                await self._db.updateStage(stageId, {'status': TaskStatus.FAILED.value})
+                await self._db.upsertMetadata(stageId, "worker:last_error", {"error": str(error)})
+                await self._db.updateTaskStatus(stage.taskId, OverallTaskStatus.FAILED)
+
             await self._emit("stageUpdated", stageId, stage.taskId)
             await self._emit("taskUpdated", stage.taskId)
 
