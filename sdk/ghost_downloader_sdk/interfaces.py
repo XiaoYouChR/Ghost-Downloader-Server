@@ -129,3 +129,10 @@ class IFeaturePack(ABC):
         The key for each field should be unique, e.g., using a "packId.fieldName" convention.
         """
         return []
+
+    def getInjectionScript(self, url: str) -> Optional[str]:
+        """
+        If this pack can enhance a page, it returns a JavaScript
+        string to be injected and executed by the content script.
+        """
+        return None

@@ -1,6 +1,6 @@
 import time
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
@@ -71,9 +71,13 @@ def create_app(
         allow_headers=["*"],
     )
 
-    app.include_router(task_router.router)
-    app.include_router(plugin_router.router)
-    app.include_router(config_router.router)
+    v1Router = APIRouter(prefix="/api/v1")
+
+    v1Router.include_router(task_router.router)
+    v1Router.include_router(plugin_router.router)
+    v1Router.include_router(config_router.router)
+
+    app.include_router(v1Router)
 
     @app.get("/", tags=["Root"])
     async def read_root():
