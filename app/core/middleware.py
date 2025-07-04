@@ -36,7 +36,7 @@ class Middleware:
 
         # 从 Parser 获取初始阶段
         try:
-            initialStageDefs: List[StageDefinition] = await parser.getInitialStages(url)
+            initialStageDefs: List[StageDefinition] = await parser.getInitialStages(url, settingsOverrides)
             if not initialStageDefs:
                 raise ValueError("Parser returned an empty list of initial stages.")
         except Exception as e:

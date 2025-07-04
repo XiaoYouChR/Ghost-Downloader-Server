@@ -124,7 +124,6 @@ class Task(BaseModel):
         "such as source URL, config overrides, or plugin-specific data.",
     )
 
-
 # --- Plugin Interaction Models: Data flowing between components ---
 
 
@@ -147,3 +146,12 @@ class StageDefinition(BaseModel):
     displayIntent: DisplayIntent
     workerType: str
     payload: Dict[str, Any] = Field(default_factory=dict)
+
+class ParserResult(BaseModel):
+    """
+    A structured result returned by a parser, containing everything needed
+    to create a task and prompt the user for configuration.
+    """
+    initialStages: List[StageDefinition]
+    interactiveConfigs: List[ConfigField]
+    defaultTitle: Optional[str] = None

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 
-from .models import CompletedTaskContext, ConfigField, WorkerCapabilities, StageDefinition
+from .models import CompletedTaskContext, ConfigField, WorkerCapabilities, StageDefinition, ParserResult
 
 
 class IWorkerContext(ABC):
@@ -45,7 +45,19 @@ class IParser(ABC):
         pass
 
     @abstractmethod
-    async def getInitialStages(self, url: str) -> List[StageDefinition]:
+    async def parseUrl(
+        self,
+        url: str,
+        initialConfigOverrides: Dict[str, Any]
+    ) -> ParserResult:
+        """
+        Parses a URL and returns a comprehensive result containing initial stages
+        and a list of interactive configuration options for the user.
+        """
+        pass
+
+    @abstractmethod
+    async def getInitialStages(self, url: str, configOverrides: Dict[str, Any]) -> List[StageDefinition]:
         """
         Parses a URL and returns a list of initial stages to be executed.
         This is the primary way a parser defines what needs to be done.

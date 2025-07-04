@@ -46,7 +46,7 @@ def loadFeaturePackClassesFromDirectory(directory: str) -> List[Tuple[str, Type[
     return loadedPackClasses
 
 
-def _findPackClassInModule(moduleName: str, modulePath: str) -> IFeaturePack | None:
+def _findPackClassInModule(moduleName: str, modulePath: str) -> Type[IFeaturePack] | None:
     """
     Dynamically imports a feature pack module from a given path and
     instantiates the IFeaturePack implementation within it.
